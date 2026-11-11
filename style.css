@@ -17,6 +17,7 @@ button { cursor: pointer; }
 .in.blue { background: var(--blue); }
 .in.red { background: var(--red); }
 .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 4px; }
+.modes.two { grid-template-columns: repeat(2, 1fr); }
 .mode { display: block; padding: 12px 8px; text-align: center; background: var(--panel2); border: 2px solid var(--line); border-radius: 8px; cursor: pointer; }
 .mode input { display: none; }
 .mode b { display: block; font-size: 18px; }

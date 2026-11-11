@@ -12,12 +12,20 @@ const TURN_SECONDS = Number(process.env.TURN_SECONDS || 30);
 const ROOM_TTL_MS = 6 * 60 * 60 * 1000;
 
 // 토너먼트 드래프트 순서 (밴 6 -> 픽 6 -> 밴 4 -> 픽 4)
-const STEPS = [
+const BASE_STEPS = [
   ['ban', 'blue', 0], ['ban', 'red', 0], ['ban', 'blue', 1], ['ban', 'red', 1], ['ban', 'blue', 2], ['ban', 'red', 2],
   ['pick', 'blue', 0], ['pick', 'red', 0], ['pick', 'red', 1], ['pick', 'blue', 1], ['pick', 'blue', 2], ['pick', 'red', 2],
   ['ban', 'red', 3], ['ban', 'blue', 3], ['ban', 'red', 4], ['ban', 'blue', 4],
   ['pick', 'red', 3], ['pick', 'blue', 3], ['pick', 'blue', 4], ['pick', 'red', 4],
-].map(([type, team, slot]) => ({ type, team, slot }));
+];
+
+// firstPick이 'red'면 팀을 서로 바꿔서 레드팀이 선픽(먼저 밴/픽)을 가진다
+function buildSteps(firstPick) {
+  const flip = firstPick === 'red';
+  return BASE_STEPS.map(([type, team, slot]) => ({
+    type, slot, team: flip ? (team === 'blue' ? 'red' : 'blue') : team,
+  }));
+}
 
 const MODES = new Set(['solo', '1v1', '5v5']);
 
@@ -55,9 +63,9 @@ async function loadChampIds() {
 const rooms = new Map();   // roomId -> room
 const tokens = new Map();  // token -> { room, seat|null }
 
-function createRoom({ blueName, redName, mode }) {
+function createRoom({ blueName, redName, mode, firstPick, hostSide }) {
   const room = {
-    id: newToken(), blueName, redName, mode,
+    id: newToken(), blueName, redName, mode, firstPick, steps: buildSteps(firstPick),
     status: 'lobby', step: 0,
     picks: { blue: Array(5).fill(null), red: Array(5).fill(null) },
     bans: { blue: Array(5).fill(null), red: Array(5).fill(null) },
@@ -68,7 +76,9 @@ function createRoom({ blueName, redName, mode }) {
   if (mode === 'solo') room.seats.push(mk('both', null));
   else if (mode === '1v1') room.seats.push(mk('blue', null), mk('red', null));
   else for (const team of ['blue', 'red']) for (let i = 0; i < 5; i++) room.seats.push(mk(team, i));
-  room.seats[0].host = true;
+  // 방장은 선택한 진영의 첫 좌석 (혼자 모드는 유일한 좌석)
+  const hostSeat = (mode !== 'solo' && room.seats.find((s) => s.team === hostSide)) || room.seats[0];
+  hostSeat.host = true;
   rooms.set(room.id, room);
   for (const seat of room.seats) tokens.set(seat.token, { room, seat });
   tokens.set(room.specToken, { room, seat: null });
@@ -78,7 +88,7 @@ function createRoom({ blueName, redName, mode }) {
 function viewFor(room, seat) {
   const v = {
     mode: room.mode, blueName: room.blueName, redName: room.redName,
-    status: room.status, step: room.step, steps: STEPS,
+    status: room.status, step: room.step, steps: room.steps, firstPick: room.firstPick,
     picks: room.picks, bans: room.bans,
     turnEndsAt: room.turnEndsAt, turnSeconds: TURN_SECONDS, serverNow: Date.now(),
     seats: room.seats.map((s) => ({ team: s.team, slot: s.slot, joined: s.conns > 0, ready: s.ready, host: s.host })),
@@ -117,10 +127,10 @@ function canAct(seat, st) {
 }
 
 function applyStep(room, value) {
-  const st = STEPS[room.step];
+  const st = room.steps[room.step];
   (st.type === 'ban' ? room.bans : room.picks)[st.team][st.slot] = value;
   room.step += 1;
-  if (room.step >= STEPS.length) {
+  if (room.step >= room.steps.length) {
     room.status = 'finished';
     room.turnEndsAt = null;
   } else {
@@ -139,7 +149,7 @@ function startIfReady(room) {
 
 function doAction(room, seat, championId) {
   if (room.status !== 'drafting') throw new HttpError(409, '진행 중인 밴픽이 아닙니다.');
-  const st = STEPS[room.step];
+  const st = room.steps[room.step];
   if (!canAct(seat, st)) throw new HttpError(403, '지금은 내 차례가 아닙니다.');
   if (championId === 'none') {
     if (st.type !== 'ban') throw new HttpError(400, '픽은 건너뛸 수 없습니다.');
@@ -156,7 +166,7 @@ setInterval(() => {
   const now = Date.now();
   for (const room of rooms.values()) {
     if (room.status !== 'drafting' || !room.turnEndsAt || now < room.turnEndsAt) continue;
-    const st = STEPS[room.step];
+    const st = room.steps[room.step];
     if (st.type === 'ban' || !champIds) return applyStep(room, 'none');
     const used = usedSet(room);
     const pool = champIds.filter((id) => !used.has(id));
@@ -219,8 +229,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && p === '/api/rooms') {
       const b = await readBody(req);
       const mode = MODES.has(b.mode) ? b.mode : 'solo';
-      const room = createRoom({ blueName: cleanName(b.blueName, '블루팀'), redName: cleanName(b.redName, '레드팀'), mode });
-      return sendJSON(res, 200, { hostToken: room.seats[0].token });
+      const firstPick = b.firstPick === 'red' ? 'red' : 'blue';
+      const hostSide = b.hostSide === 'red' ? 'red' : 'blue';
+      const room = createRoom({ blueName: cleanName(b.blueName, '블루팀'), redName: cleanName(b.redName, '레드팀'), mode, firstPick, hostSide });
+      return sendJSON(res, 200, { hostToken: room.seats.find((s) => s.host).token });
     }
 
     const m = p.match(/^\/api\/(state|events|ready|action)\/([\w-]+)$/);

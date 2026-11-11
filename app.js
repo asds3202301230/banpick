@@ -69,6 +69,16 @@
           <label class="mode"><input type="radio" name="mode" value="1v1"><b>1:1</b><span>팀장 2명</span></label>
           <label class="mode"><input type="radio" name="mode" value="5v5"><b>5:5</b><span>플레이어 10명</span></label>
         </div>
+        <label class="lbl">선픽 팀 <span class="spec-pill">먼저 밴/픽을 하는 팀</span></label>
+        <div class="modes two">
+          <label class="mode"><input type="radio" name="firstPick" value="blue" checked><b>블루팀 선픽</b><span>기본 (롤 공식 방식)</span></label>
+          <label class="mode"><input type="radio" name="firstPick" value="red"><b>레드팀 선픽</b><span>레드팀이 먼저</span></label>
+        </div>
+        <label class="lbl">내 진영 <span class="spec-pill">1:1, 5:5에서 내가 앉을 자리</span></label>
+        <div class="modes two">
+          <label class="mode"><input type="radio" name="hostSide" value="blue" checked><b>블루팀</b><span>내가 블루팀</span></label>
+          <label class="mode"><input type="radio" name="hostSide" value="red"><b>레드팀</b><span>내가 레드팀</span></label>
+        </div>
         <button id="create" class="btn primary">방 생성</button>
         <p id="err" class="err"></p>
       </main>`;
@@ -78,6 +88,8 @@
         const r = await api('/api/rooms', {
           blueName: $('#blueName').value, redName: $('#redName').value,
           mode: app.querySelector('input[name=mode]:checked').value,
+          firstPick: app.querySelector('input[name=firstPick]:checked').value,
+          hostSide: app.querySelector('input[name=hostSide]:checked').value,
         });
         location.href = `/r/${r.hostToken}`;
       } catch (e) { $('#err').textContent = e.message; btn.disabled = false; }
@@ -102,6 +114,7 @@
     let html = `<main class="card lobby">
       <h2><span style="color:var(--blue2)">${esc(S.blueName)}</span><span class="vs">VS</span><span style="color:var(--red2)">${esc(S.redName)}</span></h2>
       <div class="center-t"><span class="badge">${MODE_LABEL[S.mode]} 모드</span>
+      <span class="badge">${esc(teamName(S.firstPick))} 선픽</span>
       <span class="badge">관전 ${S.spectators}명</span></div>`;
 
     if (me.host) {
@@ -213,7 +226,7 @@
     const fin = S.status === 'finished';
     $('#tnBlue').textContent = S.blueName;
     $('#tnRed').textContent = S.redName;
-    $('#specCnt').textContent = `${MODE_LABEL[S.mode]} · 관전 ${S.spectators}명`;
+    $('#specCnt').textContent = `${MODE_LABEL[S.mode]} · ${teamName(S.firstPick)} 선픽 · 관전 ${S.spectators}명`;
     const lbl = $('#turnLabel');
     if (fin) { lbl.className = 'label'; lbl.textContent = 'FINISHED'; }
     else {
